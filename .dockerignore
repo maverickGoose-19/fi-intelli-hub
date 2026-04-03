@@ -1,0 +1,15 @@
+.git
+.gitignore
+.DS_Store
+.next
+node_modules
+coverage
+dist
+.mypy_cache
+.pytest_cache
+__pycache__
+*.pyc
+.venv
+.venv-predict
+.fastf1
+app/backend/data/runtime-cache.json
