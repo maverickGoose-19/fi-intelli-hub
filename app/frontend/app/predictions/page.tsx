@@ -21,20 +21,20 @@ export default async function PredictionsPage() {
   return (
     <main className="pb-16">
       <SiteHeader />
-      <div className="mx-auto flex max-w-7xl flex-col gap-8 px-6 lg:px-10">
+      <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 sm:px-6 lg:px-10">
         <section className="grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
-          <div className="glow-card rounded-[36px] border border-white/10 bg-black/45 p-8 shadow-panel">
+          <div className="glow-card overflow-hidden rounded-[28px] border border-white/10 bg-black/45 p-5 shadow-panel sm:rounded-[36px] sm:p-8">
             <div className="data-kicker">Prediction Lab</div>
-            <div className="mt-8 flex flex-wrap items-start justify-between gap-6">
-              <div className="max-w-3xl">
-                <h1 className="text-5xl font-semibold tracking-tight text-white md:text-6xl">
+            <div className="mt-6 flex flex-col items-start gap-5 sm:mt-8 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
+              <div className="min-w-0 max-w-3xl">
+                <h1 className="text-3xl font-semibold leading-tight tracking-tight text-white sm:text-5xl md:text-6xl">
                   {analytics.race.name} winner model
                 </h1>
-                <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-300">
+                <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300 sm:mt-5 sm:text-lg sm:leading-8">
                   {analytics.model.overview}
                 </p>
               </div>
-              <div className="rounded-[28px] border border-emerald-500/20 bg-emerald-500/10 px-5 py-4">
+              <div className="w-full rounded-[24px] border border-emerald-500/20 bg-emerald-500/10 px-4 py-4 sm:w-auto sm:rounded-[28px] sm:px-5">
                 <div className="text-xs uppercase tracking-[0.24em] text-emerald-100">Model confidence</div>
                 <div className="mt-2 text-2xl font-semibold text-white">{analytics.model.confidence}</div>
                 <div className="mt-1 text-sm text-emerald-100">{analytics.model.training.blend}</div>
@@ -65,12 +65,12 @@ export default async function PredictionsPage() {
             </div>
           </div>
 
-          <aside className="rounded-[36px] border border-white/10 bg-black/45 p-8 shadow-panel">
+          <aside className="overflow-hidden rounded-[28px] border border-white/10 bg-black/45 p-5 shadow-panel sm:rounded-[36px] sm:p-8">
             <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Track model</p>
             <div className="mt-6 space-y-4">
               <div className="rounded-[24px] border border-white/10 bg-white/5 p-5">
                 <div className="text-sm text-slate-400">Venue</div>
-                <div className="mt-2 text-2xl font-semibold text-white">{analytics.race.venue}</div>
+                <div className="mt-2 break-words text-2xl font-semibold text-white">{analytics.race.venue}</div>
                 <div className="mt-2 text-sm text-slate-300">{analytics.track.track_type}</div>
               </div>
               <div className="rounded-[24px] border border-white/10 bg-white/5 p-5">

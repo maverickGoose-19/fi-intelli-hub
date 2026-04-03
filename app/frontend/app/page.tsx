@@ -81,24 +81,24 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   return (
     <main className="pb-16">
       <SiteHeader />
-      <div className="mx-auto flex max-w-7xl flex-col gap-8 px-6 lg:px-10">
+      <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 sm:px-6 lg:px-10">
         <MobileDashboardNav activeView={activeMobileView} />
 
         <section className={`${activeMobileView === "overview" ? "grid" : "hidden"} gap-6 lg:grid lg:grid-cols-[1.35fr_0.85fr]`}>
-          <div className="glow-card rounded-[36px] border border-white/10 bg-black/40 p-8 shadow-panel">
+          <div className="glow-card overflow-hidden rounded-[28px] border border-white/10 bg-black/40 p-5 shadow-panel sm:rounded-[36px] sm:p-8">
             <div className="data-kicker">{dashboard.hero.eyebrow}</div>
-            <div className="mt-8 flex flex-wrap items-end justify-between gap-6">
-              <div className="max-w-3xl">
-                <h1 className="text-5xl font-semibold tracking-tight text-white md:text-6xl">
+            <div className="mt-6 flex flex-col items-start gap-5 sm:mt-8 lg:flex-row lg:items-end lg:justify-between lg:gap-6">
+              <div className="min-w-0 max-w-3xl">
+                <h1 className="text-3xl font-semibold leading-tight tracking-tight text-white sm:text-5xl md:text-6xl">
                   {dashboard.hero.title}
                 </h1>
-                <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-300">
+                <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300 sm:mt-5 sm:text-lg sm:leading-8">
                   {dashboard.hero.subtitle}
                 </p>
               </div>
-              <div className="rounded-[28px] border border-red-500/20 bg-red-500/10 px-5 py-4">
+              <div className="w-full rounded-[24px] border border-red-500/20 bg-red-500/10 px-4 py-4 sm:w-auto sm:rounded-[28px] sm:px-5">
                 <div className="text-xs uppercase tracking-[0.24em] text-red-100">Current phase</div>
-                <div className="mt-2 text-2xl font-semibold text-white">
+                <div className="mt-2 break-words text-xl font-semibold text-white sm:text-2xl">
                   {dashboard.hero.stage.replace(/_/g, " ")}
                 </div>
                 <div className="mt-1 text-sm text-red-100">{dashboard.hero.signal_score}</div>
@@ -120,17 +120,17 @@ export default async function HomePage({ searchParams }: HomePageProps) {
             </div>
           </div>
 
-          <aside className="rounded-[36px] border border-white/10 bg-black/45 p-8 shadow-panel">
+          <aside className="overflow-hidden rounded-[28px] border border-white/10 bg-black/45 p-5 shadow-panel sm:rounded-[36px] sm:p-8">
             <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Championship leaders</p>
             <div className="mt-8 grid gap-4">
               <div className="rounded-[24px] border border-red-500/20 bg-red-500/10 p-5">
                 <div className="text-xs uppercase tracking-[0.18em] text-red-100">Drivers leader</div>
-                <div className="mt-3 text-3xl font-semibold text-white">{dashboard.season.leader_driver}</div>
+                <div className="mt-3 break-words text-2xl font-semibold text-white sm:text-3xl">{dashboard.season.leader_driver}</div>
                 <div className="mt-2 text-sm text-red-100">{dashboard.driver_standings[0]?.points} pts</div>
               </div>
               <div className="rounded-[24px] border border-white/10 bg-white/5 p-5">
                 <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Constructors leader</div>
-                <div className="mt-3 text-3xl font-semibold text-white">{dashboard.season.leader_team}</div>
+                <div className="mt-3 break-words text-2xl font-semibold text-white sm:text-3xl">{dashboard.season.leader_team}</div>
                 <div className="mt-2 text-sm text-slate-300">{dashboard.constructor_standings[0]?.points} pts</div>
               </div>
               <div className="rounded-[24px] border border-white/10 bg-white/5 p-5">
