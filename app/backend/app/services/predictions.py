@@ -4,10 +4,14 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import json
+import logging
 import math
 from pathlib import Path
 import random
+from time import perf_counter
 from typing import Any
+
+from app.config import settings
 
 try:
     import fastf1
@@ -458,6 +462,7 @@ SOURCE_STACK = [
 
 TRAINING_CACHE_PATH = Path(__file__).resolve().parents[2] / "data" / "prediction-training-cache.json"
 FASTF1_CACHE_PATH = Path(__file__).resolve().parents[3] / ".fastf1"
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -552,6 +557,7 @@ class RaceWinnerPredictionService:
         current_weekend: dict[str, Any],
         previous_weekend: dict[str, Any] | None,
     ) -> dict[str, Any]:
+        started_at = perf_counter()
         completed_weekends = list(season.get("completed_weekend_results", []))
         if previous_weekend and all(weekend["id"] != previous_weekend["id"] for weekend in completed_weekends):
             completed_weekends.append(
@@ -679,6 +685,13 @@ class RaceWinnerPredictionService:
 
         feature_importance = self._feature_importance(model, external_model)
         constructor_outlook = self._constructor_outlook(constructor_standings)
+        logger.info(
+            "Prediction model ready for %s in %.2fs; external_model=%s cache=%s",
+            next_race.get("name", current_weekend["name"]),
+            perf_counter() - started_at,
+            bool(external_model),
+            TRAINING_CACHE_PATH.exists(),
+        )
 
         return {
             "race": {
@@ -748,6 +761,7 @@ class RaceWinnerPredictionService:
             metadata={"races": 0, "observations": 0, "positive_examples": 0, "source": "fallback"},
         )
         if requests is None:
+            logger.warning("Requests is unavailable; prediction service is using in-app fallback only.")
             return empty_bundle
 
         try:
@@ -755,17 +769,25 @@ class RaceWinnerPredictionService:
                 payload = json.loads(TRAINING_CACHE_PATH.read_text(encoding="utf-8"))
                 generated_at = datetime.fromisoformat(payload.get("generated_at", "1970-01-01T00:00:00+00:00"))
                 if (datetime.now(UTC) - generated_at) < timedelta(days=7):
+                    logger.info("Using cached historical training bundle from %s", generated_at.isoformat())
                     return HistoricalTrainingBundle(
                         rows=payload.get("rows", []),
                         labels=payload.get("labels", []),
                         metadata=payload.get("metadata", {}),
                     )
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as error:  # noqa: BLE001
+            logger.warning("Historical training cache could not be read; rebuilding. error=%s", error)
+
+        if settings.app_env == "production" and not settings.prediction_enable_live_training:
+            logger.info(
+                "Skipping live historical training in production because PREDICTION_ENABLE_LIVE_TRAINING is disabled."
+            )
+            return empty_bundle
 
         try:
             bundle = self._fetch_historical_training_bundle()
-        except Exception:  # noqa: BLE001
+        except Exception as error:  # noqa: BLE001
+            logger.warning("Historical training fetch failed; falling back to in-app model. error=%s", error)
             return empty_bundle
         if bundle.rows:
             TRAINING_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -782,10 +804,18 @@ class RaceWinnerPredictionService:
                 ),
                 encoding="utf-8",
             )
+            logger.info(
+                "Stored historical training bundle at %s with %s races and %s observations",
+                TRAINING_CACHE_PATH,
+                bundle.metadata.get("races"),
+                bundle.metadata.get("observations"),
+            )
             return bundle
+        logger.info("Historical training bundle returned no rows; using in-app fallback.")
         return empty_bundle
 
     def _fetch_historical_training_bundle(self) -> HistoricalTrainingBundle:
+        logger.info("Fetching historical training data for prediction model.")
         rows: list[list[float]] = []
         labels: list[int] = []
         seasons = [2024]
@@ -938,7 +968,10 @@ class RaceWinnerPredictionService:
     def _ergast_races(self, path: str) -> list[dict[str, Any]]:
         if requests is None:
             return []
-        response = requests.get(f"https://api.jolpi.ca/ergast/f1{path}", timeout=20)
+        response = requests.get(
+            f"https://api.jolpi.ca/ergast/f1{path}",
+            timeout=settings.prediction_http_timeout_seconds,
+        )
         response.raise_for_status()
         payload = response.json()
         return payload.get("MRData", {}).get("RaceTable", {}).get("Races", [])
@@ -952,7 +985,7 @@ class RaceWinnerPredictionService:
         while True:
             response = requests.get(
                 f"https://api.jolpi.ca/ergast/f1{path}?limit={limit}&offset={offset}",
-                timeout=20,
+                timeout=settings.prediction_http_timeout_seconds,
             )
             response.raise_for_status()
             payload = response.json().get("MRData", {})
@@ -1028,7 +1061,8 @@ class RaceWinnerPredictionService:
                 return None
             event = candidates.iloc[0]
             return f"{event['EventName']} at {event['Location']}"
-        except Exception:  # noqa: BLE001
+        except Exception as error:  # noqa: BLE001
+            logger.info("FastF1 schedule context unavailable for %s: %s", race_name, error)
             return None
 
     def _build_season_stats(

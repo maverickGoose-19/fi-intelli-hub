@@ -1,6 +1,7 @@
 import { ArticleFeed } from "@/components/article-feed";
 import { ClusterCard } from "@/components/cluster-card";
 import { CompletedWeekendResults } from "@/components/completed-weekend-results";
+import { MobileDashboardNav, type DashboardView } from "@/components/mobile-dashboard-nav";
 import { NextRacePrediction } from "@/components/next-race-prediction";
 import { PhaseSwitcher } from "@/components/phase-switcher";
 import { PerformanceCharts } from "@/components/performance-charts";
@@ -14,6 +15,26 @@ import { getCurrentDashboard } from "@/lib/api";
 import { dashboardMock } from "@/lib/mock-data";
 
 export const dynamic = "force-dynamic";
+
+type HomePageProps = {
+  searchParams?: Promise<{
+    view?: string | string[];
+  }>;
+};
+
+function normalizeDashboardView(value: string | string[] | undefined): DashboardView {
+  const candidate = Array.isArray(value) ? value[0] : value;
+  switch (candidate) {
+    case "standings":
+    case "timings":
+    case "insights":
+    case "schedule":
+    case "articles":
+      return candidate;
+    default:
+      return "overview";
+  }
+}
 
 function hasChartData(charts: (typeof dashboardMock)["performance_charts"] | undefined) {
   if (!charts) {
@@ -31,7 +52,9 @@ function hasCompletedWeekendResults(
   return Boolean(weekends && weekends.length > 1);
 }
 
-export default async function HomePage() {
+export default async function HomePage({ searchParams }: HomePageProps) {
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const activeMobileView = normalizeDashboardView(resolvedSearchParams?.view);
   const liveDashboard = await getCurrentDashboard();
   const dashboard = {
     ...dashboardMock,
@@ -59,7 +82,9 @@ export default async function HomePage() {
     <main className="pb-16">
       <SiteHeader />
       <div className="mx-auto flex max-w-7xl flex-col gap-8 px-6 lg:px-10">
-        <section className="grid gap-6 lg:grid-cols-[1.35fr_0.85fr]">
+        <MobileDashboardNav activeView={activeMobileView} />
+
+        <section className={`${activeMobileView === "overview" ? "grid" : "hidden"} gap-6 lg:grid lg:grid-cols-[1.35fr_0.85fr]`}>
           <div className="glow-card rounded-[36px] border border-white/10 bg-black/40 p-8 shadow-panel">
             <div className="data-kicker">{dashboard.hero.eyebrow}</div>
             <div className="mt-8 flex flex-wrap items-end justify-between gap-6">
@@ -131,7 +156,7 @@ export default async function HomePage() {
           </aside>
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <section className={`${activeMobileView === "standings" ? "grid" : "hidden"} gap-6 lg:grid xl:grid-cols-[1.1fr_0.9fr]`}>
           <StandingsTable
             title="Drivers' championship"
             subtitle="Season standings"
@@ -146,7 +171,7 @@ export default async function HomePage() {
           />
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+        <section className={`${activeMobileView === "timings" ? "grid" : "hidden"} gap-6 lg:grid xl:grid-cols-[1.05fr_0.95fr]`}>
           <CompletedWeekendResults weekends={dashboard.completed_weekend_results} />
           <NextRacePrediction
             prediction={dashboard.next_race_prediction}
@@ -154,11 +179,15 @@ export default async function HomePage() {
           />
         </section>
 
-        <PerformanceCharts charts={dashboard.performance_charts} driverStandings={dashboard.driver_standings} />
+        <div className={activeMobileView === "standings" ? "block lg:block" : "hidden lg:block"}>
+          <TeamCarsGrid teams={dashboard.team_cars} />
+        </div>
 
-        <TeamCarsGrid teams={dashboard.team_cars} />
+        <div className={activeMobileView === "insights" ? "block lg:block" : "hidden lg:block"}>
+          <PerformanceCharts charts={dashboard.performance_charts} driverStandings={dashboard.driver_standings} />
+        </div>
 
-        <section className="grid gap-6 xl:grid-cols-[1fr_1fr]">
+        <section className={`${activeMobileView === "insights" ? "grid" : "hidden"} gap-6 lg:grid xl:grid-cols-[1fr_1fr]`}>
           <div>
             <div className="mb-5 flex items-center justify-between">
               <h2 className="text-2xl font-semibold text-white">Weekend state</h2>
@@ -179,7 +208,7 @@ export default async function HomePage() {
           </div>
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-2">
+        <section className={`${activeMobileView === "insights" ? "grid" : "hidden"} gap-6 lg:grid xl:grid-cols-2`}>
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-2xl font-semibold text-white">Official surfaces</h2>
@@ -206,9 +235,13 @@ export default async function HomePage() {
           </div>
         </section>
 
-        <SeasonCalendar races={dashboard.calendar} />
+        <div className={activeMobileView === "schedule" ? "block lg:block" : "hidden lg:block"}>
+          <SeasonCalendar races={dashboard.calendar} />
+        </div>
 
-        <ArticleFeed items={dashboard.article_feed} />
+        <div className={activeMobileView === "articles" ? "block lg:block" : "hidden lg:block"}>
+          <ArticleFeed items={dashboard.article_feed} />
+        </div>
       </div>
     </main>
   );

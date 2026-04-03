@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from time import perf_counter
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -8,6 +10,13 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.repository import SeedRepository
+
+
+logging.basicConfig(
+    level=getattr(logging, settings.log_level, logging.INFO),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 class SummaryPatchPayload(BaseModel):
@@ -40,7 +49,19 @@ def get_dashboard_current() -> dict[str, Any]:
 
 @app.get("/api/predictions/next-race")
 def get_prediction_analytics() -> dict[str, Any]:
-    return repository.get_prediction_analytics()
+    start = perf_counter()
+    try:
+        payload = repository.get_prediction_analytics()
+        logger.info(
+            "Prediction payload built for %s in %.2fs using %s completed races",
+            payload["race"]["name"],
+            perf_counter() - start,
+            payload["model"]["training"]["completed_races"],
+        )
+        return payload
+    except Exception as error:  # noqa: BLE001
+        logger.exception("Prediction payload generation failed: %s", error)
+        raise HTTPException(status_code=502, detail="Prediction analytics failed") from error
 
 
 @app.get("/api/clusters")
@@ -93,6 +114,7 @@ def sync_openf1(force: bool = True, include_articles: bool = True) -> dict[str, 
             )
         }
     except Exception as error:  # noqa: BLE001
+        logger.exception("OpenF1 sync failed: %s", error)
         raise HTTPException(status_code=502, detail=str(error)) from error
 
 

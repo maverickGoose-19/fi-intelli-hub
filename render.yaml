@@ -14,10 +14,16 @@ services:
     envVars:
       - key: APP_ENV
         value: production
+      - key: LOG_LEVEL
+        value: INFO
       - key: LOCAL_TIMEZONE
         value: America/Los_Angeles
       - key: OPENF1_BASE_URL
         value: https://api.openf1.org/v1
+      - key: PREDICTION_ENABLE_LIVE_TRAINING
+        value: false
+      - key: PREDICTION_HTTP_TIMEOUT_SECONDS
+        value: 8
 
   - type: web
     name: f1-intelli-web

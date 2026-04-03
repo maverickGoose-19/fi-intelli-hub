@@ -24,10 +24,12 @@ async function fetchFromApi<T>(path: string, fallback: T): Promise<T> {
       next: { revalidate: 30 },
     });
     if (!response.ok) {
+      console.error(`[api] request failed`, { path, status: response.status, apiBaseUrl: API_BASE_URL });
       throw new Error(`Request failed for ${path}`);
     }
     return (await response.json()) as T;
-  } catch {
+  } catch (error) {
+    console.error(`[api] falling back to mock payload`, { path, apiBaseUrl: API_BASE_URL, error });
     return fallback;
   }
 }
