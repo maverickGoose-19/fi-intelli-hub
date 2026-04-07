@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 
-import { getClientApiBaseUrl } from "@/lib/api";
 import { Cluster, EditorialStatus, SummaryLabel } from "@/lib/types";
 import { SummaryPill } from "@/components/summary-pill";
 
@@ -23,7 +22,7 @@ export function AdminWorkbench({ initialClusters }: { initialClusters: Cluster[]
     setIsPending(true);
     void (async () => {
       try {
-        const response = await fetch(`${getClientApiBaseUrl()}/api/clusters/${clusterId}/resummarize`, {
+        const response = await fetch(`/api/clusters/${clusterId}/resummarize`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
         });
@@ -58,7 +57,7 @@ export function AdminWorkbench({ initialClusters }: { initialClusters: Cluster[]
     setIsPending(true);
     void (async () => {
       try {
-        const response = await fetch(`${getClientApiBaseUrl()}/api/summaries/${cluster.summary.id}`, {
+        const response = await fetch(`/api/summaries/${cluster.summary.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(patch),

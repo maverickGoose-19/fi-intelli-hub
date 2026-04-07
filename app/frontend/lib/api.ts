@@ -6,30 +6,30 @@ import {
   predictionAnalyticsMock,
   sourcesMock,
 } from "@/lib/mock-data";
+import { getServerApiBaseUrl } from "@/lib/api-base-url";
 import { Cluster, DashboardResponse, Entity, PredictionAnalyticsResponse, Source } from "@/lib/types";
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || process.env.API_BASE_URL || "http://127.0.0.1:8000";
 const IS_BUILD_TIME = process.env.NEXT_PHASE === "phase-production-build";
 const HAS_EXPLICIT_API_BASE_URL = Boolean(
-  process.env.NEXT_PUBLIC_API_BASE_URL || process.env.API_BASE_URL,
+  process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL,
 );
 
 async function fetchFromApi<T>(path: string, fallback: T): Promise<T> {
   if (IS_BUILD_TIME && !HAS_EXPLICIT_API_BASE_URL) {
     return fallback;
   }
+  const apiBaseUrl = getServerApiBaseUrl();
   try {
-    const response = await fetch(`${API_BASE_URL}${path}`, {
+    const response = await fetch(`${apiBaseUrl}${path}`, {
       next: { revalidate: 30 },
     });
     if (!response.ok) {
-      console.error(`[api] request failed`, { path, status: response.status, apiBaseUrl: API_BASE_URL });
+      console.error(`[api] request failed`, { path, status: response.status, apiBaseUrl });
       throw new Error(`Request failed for ${path}`);
     }
     return (await response.json()) as T;
   } catch (error) {
-    console.error(`[api] falling back to mock payload`, { path, apiBaseUrl: API_BASE_URL, error });
+    console.error(`[api] falling back to mock payload`, { path, apiBaseUrl, error });
     return fallback;
   }
 }
@@ -65,13 +65,10 @@ export async function getEntities(): Promise<Entity[]> {
 }
 
 export async function syncLatestOpenF1(includeArticles: boolean = true) {
-  const response = await fetch(
-    `${getClientApiBaseUrl()}/api/sync/openf1?include_articles=${includeArticles ? "true" : "false"}`,
-    {
+  const response = await fetch(`/api/sync/openf1?include_articles=${includeArticles ? "true" : "false"}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    },
-  );
+  });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({ detail: "Sync failed" }));
     throw new Error(payload.detail || "Sync failed");
@@ -82,8 +79,4 @@ export async function syncLatestOpenF1(includeArticles: boolean = true) {
       message: string;
     };
   }>;
-}
-
-export function getClientApiBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 }
