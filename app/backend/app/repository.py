@@ -168,7 +168,7 @@ class SeedRepository:
         return deepcopy(self.data.get("sync", {}))
 
     def _is_known_sync_fallback(self, error: Exception) -> bool:
-        if isinstance(error, HTTPError) and error.code == 404:
+        if isinstance(error, HTTPError) and error.code in {404, 429}:
             return True
         return isinstance(error, ValueError)
 
@@ -177,6 +177,11 @@ class SeedRepository:
             return (
                 "OpenF1 did not return one of the requested endpoints right now. "
                 "The dashboard kept the current cached data instead of failing."
+            )
+        if isinstance(error, HTTPError) and error.code == 429:
+            return (
+                "OpenF1 rate-limited the sync request. "
+                "The dashboard kept the latest cached snapshot instead of failing."
             )
         return (
             "OpenF1 did not return enough data for a full refresh. "

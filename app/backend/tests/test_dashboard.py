@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import unittest
+from urllib.error import HTTPError
 from zoneinfo import ZoneInfo
 
 from app.seed import load_seed_data
@@ -93,6 +94,24 @@ class DashboardPayloadTests(unittest.TestCase):
         repository.data["sync"]["last_success_at"] = "2026-04-05T08:00:00-07:00"
 
         self.assertFalse(repository._should_auto_sync_today())
+
+    def test_sync_degrades_gracefully_when_openf1_rate_limits(self) -> None:
+        repository = SeedRepository()
+
+        def raise_rate_limit(_base_data, now=None):  # type: ignore[no-untyped-def]
+            raise HTTPError(
+                url="https://api.openf1.org/v1/sessions?year=2026",
+                code=429,
+                msg="Too Many Requests",
+                hdrs=None,
+                fp=None,
+            )
+
+        repository.openf1_sync.sync = raise_rate_limit  # type: ignore[assignment]
+        result = repository.sync_openf1(include_articles=False)
+
+        self.assertEqual(result["status"], "degraded")
+        self.assertIn("rate-limited", result["message"])
 
 
 if __name__ == "__main__":

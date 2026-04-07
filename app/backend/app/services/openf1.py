@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from collections import deque
 from datetime import datetime
 import json
+import logging
+from threading import Lock
+from time import monotonic, sleep
 from typing import Any, Callable
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -13,6 +17,7 @@ from app.config import settings
 
 
 JsonFetcher = Callable[[str, dict[str, Any]], list[dict[str, Any]]]
+logger = logging.getLogger(__name__)
 
 
 def _normalized_openf1_base_url() -> str:
@@ -20,11 +25,55 @@ def _normalized_openf1_base_url() -> str:
     return base_url if base_url.endswith("/v1") else f"{base_url}/v1"
 
 
+class OpenF1RateLimiter:
+    def __init__(
+        self,
+        max_requests_per_second: int = 3,
+        max_requests_per_minute: int = 30,
+        now_fn: Callable[[], float] = monotonic,
+        sleep_fn: Callable[[float], None] = sleep,
+    ) -> None:
+        self.max_requests_per_second = max_requests_per_second
+        self.max_requests_per_minute = max_requests_per_minute
+        self.now_fn = now_fn
+        self.sleep_fn = sleep_fn
+        self._lock = Lock()
+        self._request_times: deque[float] = deque()
+
+    def acquire(self) -> None:
+        while True:
+            wait_seconds = 0.0
+            with self._lock:
+                now = self.now_fn()
+                self._prune(now)
+                if len(self._request_times) >= self.max_requests_per_minute:
+                    oldest_minute = self._request_times[0]
+                    wait_seconds = max(wait_seconds, 60.0 - (now - oldest_minute))
+                if len(self._request_times) >= self.max_requests_per_second:
+                    second_window = list(self._request_times)[-self.max_requests_per_second :]
+                    oldest_second = second_window[0]
+                    wait_seconds = max(wait_seconds, 1.0 - (now - oldest_second))
+                if wait_seconds <= 0:
+                    self._request_times.append(now)
+                    return
+            wait_seconds = max(wait_seconds, 0.01)
+            logger.info("Throttling OpenF1 request for %.2fs to respect API limits", wait_seconds)
+            self.sleep_fn(wait_seconds)
+
+    def _prune(self, now: float) -> None:
+        while self._request_times and now - self._request_times[0] >= 60.0:
+            self._request_times.popleft()
+
+
+OPENF1_RATE_LIMITER = OpenF1RateLimiter()
+
+
 def _default_fetch_json(endpoint: str, params: dict[str, Any]) -> list[dict[str, Any]]:
     query = urlencode({key: value for key, value in params.items() if value is not None}, doseq=True)
     url = f"{_normalized_openf1_base_url()}/{endpoint}"
     if query:
         url = f"{url}?{query}"
+    OPENF1_RATE_LIMITER.acquire()
     request = Request(url, headers={"User-Agent": "F1-Intelligence-Hub/0.1"})
     with urlopen(request, timeout=20) as response:
         return json.loads(response.read().decode("utf-8"))
@@ -120,8 +169,11 @@ def _result_metric(entry: dict[str, Any], position: int) -> str:
 class OpenF1SyncService:
     def __init__(self, fetch_json: JsonFetcher | None = None) -> None:
         self.fetch_json = fetch_json or _default_fetch_json
+        self._response_cache: dict[tuple[str, tuple[tuple[str, Any], ...]], list[dict[str, Any]]] = {}
+        self._driver_lookup_cache: dict[int, dict[int, dict[str, Any]]] = {}
 
     def sync(self, base_data: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
+        self._reset_request_caches()
         local_zone = ZoneInfo(settings.local_timezone)
         current_time = now or datetime.now(local_zone)
         current_time = current_time.astimezone(local_zone)
@@ -151,8 +203,16 @@ class OpenF1SyncService:
             constructor_standings = deepcopy(base_data.get("season", {}).get("constructor_standings", []))
         calendar = self._build_calendar(meetings, current_time)
         current_phase = self._compute_current_phase(current_meeting, active_meeting, current_time)
-        performance_charts = self._build_performance_charts(meetings, driver_standings)
-        completed_weekend_results = self._build_completed_weekend_results(meetings)
+        completed_meetings = [meeting for meeting in meetings if self._latest_race_session(meeting) and meeting["date_end"] < current_time]
+        performance_charts = self._build_or_reuse_performance_charts(
+            completed_meetings,
+            driver_standings,
+            base_data.get("season", {}).get("performance_charts"),
+        )
+        completed_weekend_results = self._build_or_reuse_completed_weekend_results(
+            completed_meetings,
+            base_data.get("season", {}).get("completed_weekend_results"),
+        )
 
         updated = deepcopy(base_data)
         updated["season"] = self._build_season_payload(
@@ -190,9 +250,56 @@ class OpenF1SyncService:
         updated["distribution_assets"] = derived["distribution_assets"]
         return updated
 
+    def _reset_request_caches(self) -> None:
+        self._response_cache = {}
+        self._driver_lookup_cache = {}
+
+    def _request_cache_key(self, endpoint: str, params: dict[str, Any]) -> tuple[str, tuple[tuple[str, Any], ...]]:
+        normalized_params: list[tuple[str, Any]] = []
+        for key, value in sorted(params.items()):
+            if isinstance(value, list):
+                normalized_params.append((key, tuple(value)))
+            else:
+                normalized_params.append((key, value))
+        return endpoint, tuple(normalized_params)
+
+    def _fetch_json_cached(self, endpoint: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        cache_key = self._request_cache_key(endpoint, params)
+        cached = self._response_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        attempts = 2
+        last_error: HTTPError | None = None
+        for attempt in range(attempts):
+            try:
+                payload = self.fetch_json(endpoint, params)
+                self._response_cache[cache_key] = payload
+                return payload
+            except HTTPError as error:
+                last_error = error
+                if error.code != 429 or attempt == attempts - 1:
+                    raise
+                retry_after_header = error.headers.get("Retry-After") if error.headers else None
+                try:
+                    retry_after = float(retry_after_header) if retry_after_header else 1.0 + attempt
+                except ValueError:
+                    retry_after = 1.0 + attempt
+                wait_seconds = min(max(retry_after, 0.5), 2.0)
+                logger.warning(
+                    "OpenF1 rate-limited %s %s; retrying in %.1fs",
+                    endpoint,
+                    params,
+                    wait_seconds,
+                )
+                sleep(wait_seconds)
+        if last_error is not None:
+            raise last_error
+        return []
+
     def _fetch_sessions_for_year(self, target_year: int) -> list[dict[str, Any]]:
         try:
-            return self.fetch_json("sessions", {"year": target_year})
+            return self._fetch_json_cached("sessions", {"year": target_year})
         except HTTPError as error:
             if error.code != 404:
                 raise
@@ -200,9 +307,11 @@ class OpenF1SyncService:
 
     def _safe_fetch_json(self, endpoint: str, params: dict[str, Any]) -> list[dict[str, Any]]:
         try:
-            return self.fetch_json(endpoint, params)
+            return self._fetch_json_cached(endpoint, params)
         except HTTPError as error:
-            if error.code == 404:
+            if error.code in {404, 429}:
+                if error.code == 429:
+                    logger.warning("OpenF1 rate-limited optional endpoint %s %s; using cached fallback", endpoint, params)
                 return []
             raise
 
@@ -265,8 +374,13 @@ class OpenF1SyncService:
         return race_sessions[-1] if race_sessions else None
 
     def _build_driver_lookup(self, session_key: int) -> dict[int, dict[str, Any]]:
+        cached = self._driver_lookup_cache.get(session_key)
+        if cached is not None:
+            return cached
         drivers = self._safe_fetch_json("drivers", {"session_key": session_key})
-        return {int(driver["driver_number"]): driver for driver in drivers if driver.get("driver_number") is not None}
+        lookup = {int(driver["driver_number"]): driver for driver in drivers if driver.get("driver_number") is not None}
+        self._driver_lookup_cache[session_key] = lookup
+        return lookup
 
     def _build_latest_results(
         self, meeting: dict[str, Any], driver_lookup: dict[int, dict[str, Any]]
@@ -563,8 +677,31 @@ class OpenF1SyncService:
             },
         }
 
+    def _build_or_reuse_performance_charts(
+        self,
+        completed_meetings: list[dict[str, Any]],
+        driver_standings: list[dict[str, Any]],
+        existing_charts: Any,
+    ) -> dict[str, Any]:
+        if self._can_reuse_performance_charts(existing_charts, completed_meetings):
+            logger.info("Reusing cached performance charts for %s completed meetings", len(completed_meetings))
+            return deepcopy(existing_charts)
+        return self._build_performance_charts(completed_meetings, driver_standings)
+
+    def _can_reuse_performance_charts(
+        self,
+        existing_charts: Any,
+        completed_meetings: list[dict[str, Any]],
+    ) -> bool:
+        if not isinstance(existing_charts, dict):
+            return False
+        race_labels = existing_charts.get("race_labels")
+        if not isinstance(race_labels, list) or not completed_meetings:
+            return False
+        return len(race_labels) == len(completed_meetings) and race_labels[-1:] == [completed_meetings[-1]["name"]]
+
     def _build_performance_charts(
-        self, meetings: list[dict[str, Any]], driver_standings: list[dict[str, Any]]
+        self, completed_meetings: list[dict[str, Any]], driver_standings: list[dict[str, Any]]
     ) -> dict[str, Any]:
         top_contenders = driver_standings[:10]
         contender_names = [entry["name"] for entry in top_contenders]
@@ -573,7 +710,6 @@ class OpenF1SyncService:
         contender_fastest_laps = {entry["name"]: [] for entry in top_contenders}
         race_labels: list[str] = []
 
-        completed_meetings = [meeting for meeting in meetings if self._latest_race_session(meeting)]
         for meeting in completed_meetings:
             race_session = self._latest_race_session(meeting)
             if race_session is None:
@@ -643,9 +779,31 @@ class OpenF1SyncService:
             ],
         }
 
-    def _build_completed_weekend_results(self, meetings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _build_or_reuse_completed_weekend_results(
+        self,
+        completed_meetings: list[dict[str, Any]],
+        existing_results: Any,
+    ) -> list[dict[str, Any]]:
+        if self._can_reuse_completed_weekend_results(existing_results, completed_meetings):
+            logger.info("Reusing cached completed weekend results for %s meetings", len(completed_meetings))
+            return deepcopy(existing_results)
+        return self._build_completed_weekend_results(completed_meetings)
+
+    def _can_reuse_completed_weekend_results(
+        self,
+        existing_results: Any,
+        completed_meetings: list[dict[str, Any]],
+    ) -> bool:
+        if not isinstance(existing_results, list) or not completed_meetings:
+            return False
+        if len(existing_results) != len(completed_meetings):
+            return False
+        last_existing = existing_results[-1] if existing_results else {}
+        return isinstance(last_existing, dict) and last_existing.get("name") == completed_meetings[-1]["name"]
+
+    def _build_completed_weekend_results(self, completed_meetings: list[dict[str, Any]]) -> list[dict[str, Any]]:
         completed_weekends: list[dict[str, Any]] = []
-        for meeting in meetings:
+        for meeting in completed_meetings:
             race_session = self._latest_race_session(meeting)
             if race_session is None:
                 continue
